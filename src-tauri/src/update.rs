@@ -101,19 +101,33 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
         return Err(e.to_string());
     }
 
-    // Start the new exe a moment after this one exits: both would otherwise
-    // fight over the WebView data folder.
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let script = format!("ping 127.0.0.1 -n 2 >nul & start \"\" \"{}\"", exe.display());
-        std::process::Command::new("cmd")
-            .args(["/C", &script])
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
+    relaunch_after_exit(&exe)?;
     app.exit(0);
     Ok(())
+}
+
+/// Starts `exe` a moment after this process exits: both would otherwise fight
+/// over the WebView data folder.
+#[cfg(windows)]
+fn relaunch_after_exit(exe: &Path) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+
+    // raw_arg, not arg: Rust would escape the quotes as \" , which cmd.exe
+    // doesn't understand, and `start` would silently fail.
+    let line = format!("/C ping 127.0.0.1 -n 2 >nul & start \"\" \"{}\"", exe.display());
+    let spawn = |flags: u32| std::process::Command::new("cmd").raw_arg(&line).creation_flags(flags).spawn();
+    // Leave any job object we were started in, so the relauncher survives our
+    // exit; some launchers' jobs forbid that, so fall back to staying in it.
+    spawn(CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB)
+        .or_else(|_| spawn(CREATE_NO_WINDOW | DETACHED_PROCESS))
+        .map(|_| ())
+        .map_err(|e| format!("can't restart YAQS: {e}"))
+}
+
+#[cfg(not(windows))]
+fn relaunch_after_exit(exe: &Path) -> Result<(), String> {
+    std::process::Command::new(exe).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
