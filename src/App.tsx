@@ -147,9 +147,9 @@ export function App() {
             )
             : (
               <>
-                <PlayersChart addrs={viewAddrs} />
                 {state.wall ? <Wall rows={rows} selected={selected} onSelect={setSelected} />
                   : <ServerTable rows={rows} selected={selected} onSelect={setSelected} checked={checked} setChecked={setChecked} empty={emptyText} onEdit={setEditAddrs} />}
+                <PlayersChart addrs={viewAddrs} />
               </>
             )}
         </main>

@@ -7,7 +7,7 @@ import { useLang, useT } from '../lib/i18n'
 /** Windows offered by the chart, in seconds. */
 const WINDOWS = [600, 1800, 3600, 4 * 3600, 12 * 3600, 24 * 3600, 3 * 24 * 3600] as const
 const BARS = 60
-const HEIGHT = 112
+const HEIGHT = 96
 const PAD = { left: 34, right: 4, top: 8, bottom: 20 }
 
 interface Chart {
@@ -23,7 +23,8 @@ function niceMax(v: number): number {
   return 10 * step
 }
 
-/** Total players of the servers in the current view, as a histogram over time. */
+/** Total players of the servers in the current view, as a histogram over time.
+ *  Sits under the list; collapsed it's a slim bar with the totals and a sparkline. */
 export function PlayersChart({ addrs }: { addrs: string[] }) {
   const t = useT()
   const lang = useLang()
@@ -44,16 +45,15 @@ export function PlayersChart({ addrs }: { addrs: string[] }) {
     return () => ro.disconnect()
   }, [open])
 
-  // Refresh about once per bar, between every 5 s and every minute.
+  // Refresh about once per bar (5 s to 1 min); every 30 s while collapsed.
   useEffect(() => {
-    if (!open) return
     let alive = true
     const load = () =>
       invoke<Chart>('players_history', { addrs: key ? key.split(',') : [], window: win, bars: BARS })
         .then((c) => alive && setChart(c))
         .catch(() => {})
     load()
-    const every = Math.min(60, Math.max(5, win / BARS)) * 1000
+    const every = (open ? Math.min(60, Math.max(5, win / BARS)) : 30) * 1000
     const timer = setInterval(load, every)
     return () => {
       alive = false
@@ -109,11 +109,36 @@ export function PlayersChart({ addrs }: { addrs: string[] }) {
 
   return (
     <section className={`pchart${open ? '' : ' closed'}`} aria-label={t('ch.title')}>
-      <div className="pc-head">
-        <button className="pc-toggle" aria-expanded={open} onClick={() => setSettings({ chartOpen: !open })}>
-          <span className="chev">{open ? '▾' : '▸'}</span> {t('ch.title')}
+      {!open && (
+        <button className="pc-bar" aria-expanded={false} title={t('ch.expand')} onClick={() => setSettings({ chartOpen: true })}>
+          <span className="chev">▸</span>
+          <span className="pc-name">{t('ch.title')}</span>
+          {stats && (
+            <span className="pc-mini-stats">
+              <span>{t('ch.now')} <b>{stats.now}</b></span>
+              <span>{t('ch.peak')} <b>{stats.peak}</b></span>
+              <span className="faint">{winLabel(win)}</span>
+            </span>
+          )}
+          <span className="spacer" />
+          {chart && stats && (
+            <svg className="pc-spark" width="160" height="16" aria-hidden="true">
+              {chart.values.map((v, i) => {
+                if (v === null || v <= 0) return null
+                const w = 160 / chart.values.length
+                const h = Math.max(1, (v / stats.max) * 16)
+                return <rect key={i} x={i * w} y={16 - h} width={Math.max(1, w - 1)} height={h} />
+              })}
+            </svg>
+          )}
         </button>
-        {open && stats && (
+      )}
+
+      {open && <div className="pc-head">
+        <button className="pc-toggle" aria-expanded={open} title={t('ch.collapse')} onClick={() => setSettings({ chartOpen: false })}>
+          <span className="chev">▾</span> {t('ch.title')}
+        </button>
+        {stats && (
           <dl className="pc-stats">
             <div><dt>{t('ch.now')}</dt><dd>{stats.now}</dd></div>
             <div><dt>{t('ch.peak')}</dt><dd>{stats.peak}</dd></div>
@@ -121,15 +146,13 @@ export function PlayersChart({ addrs }: { addrs: string[] }) {
           </dl>
         )}
         <span className="spacer" />
-        {open && (
-          <div className="pc-windows" role="radiogroup" aria-label={t('ch.window')}>
-            {WINDOWS.map((s) => (
-              <button key={s} role="radio" aria-checked={win === s} className={win === s ? 'on' : ''}
-                onClick={() => setSettings({ chartWindow: s })}>{winLabel(s)}</button>
-            ))}
-          </div>
-        )}
-      </div>
+        <div className="pc-windows" role="radiogroup" aria-label={t('ch.window')}>
+          {WINDOWS.map((s) => (
+            <button key={s} role="radio" aria-checked={win === s} className={win === s ? 'on' : ''}
+              onClick={() => setSettings({ chartWindow: s })}>{winLabel(s)}</button>
+          ))}
+        </div>
+      </div>}
 
       {open && (
         <div className="pc-plot" ref={box} onMouseLeave={() => setHover(null)}>

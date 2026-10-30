@@ -355,6 +355,8 @@ export const en = {
   'ch.peak': 'Peak',
   'ch.avg': 'Average',
   'ch.window': 'Time window',
+  'ch.expand': 'Show the chart',
+  'ch.collapse': 'Hide the chart',
   'ch.minutes': (n: number) => `${n} min`,
   'ch.hours': (n: number) => `${n} h`,
   'ch.days': (n: number) => `${n} ${plural(n, 'day', 'days')}`,

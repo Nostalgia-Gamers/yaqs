@@ -28,7 +28,7 @@ const defaultSettings: Settings = {
   sound: false,
   steamKey: '',
   lang: 'auto',
-  chartOpen: true,
+  chartOpen: false,
   chartWindow: 3600,
 }
 

@@ -356,6 +356,8 @@ export const es: Dict = {
   'ch.peak': 'Pico',
   'ch.avg': 'Promedio',
   'ch.window': 'Período',
+  'ch.expand': 'Mostrar el gráfico',
+  'ch.collapse': 'Ocultar el gráfico',
   'ch.minutes': (n) => `${n} min`,
   'ch.hours': (n) => `${n} h`,
   'ch.days': (n) => `${n} ${plural(n, 'día', 'días')}`,
