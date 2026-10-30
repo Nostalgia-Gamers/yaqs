@@ -371,6 +371,17 @@ export const es: Dict = {
   // Actualizaciones
   'up.installing': (v) => `Actualizando a la versión ${v}…`,
   'up.restart': 'YAQS se va a reiniciar en un momento.',
+  'up.title': 'Actualizaciones',
+  'up.version': (v) => `Tenés la versión ${v}.`,
+  'up.channel': 'Canal de actualizaciones',
+  'up.auto': (c) => `Automático (${c})`,
+  'up.stable': 'Estable',
+  'up.beta': 'Beta',
+  'up.help': 'Estable recibe solo versiones probadas. Beta también recibe las versiones de prueba (como 0.2.0-beta.1) antes que todos, y pasa a la estable cuando sale. YAQS nunca vuelve a una versión anterior.',
+  'up.check': 'Buscar actualizaciones ahora',
+  'up.checking': 'Buscando…',
+  'up.latest': 'Tenés la última versión.',
+  'up.failed': 'No se pudo buscar actualizaciones. Revisá tu conexión y probá de nuevo.',
 
   // Menú del clic derecho
   'cm.actions': (label) => `Acciones para ${label}`,

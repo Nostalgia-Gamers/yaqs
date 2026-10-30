@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { getVersion } from '@tauri-apps/api/app'
 import { Dialog } from './Dialog'
 import { setSettings, useDb, useStorageOk } from '../lib/store'
 import { languages, useT } from '../lib/i18n'
 import { downloadPack, uploadPack } from '../lib/transfer'
+import { channelFor, updateNow } from '../lib/updater'
 import type { ColumnKey } from '../lib/types'
 
 const intervals = [1, 2, 3, 5, 10, 30, 60]
@@ -26,6 +28,23 @@ export function Settings({ open, onClose }: { open: boolean; onClose: () => void
   const [replace, setReplace] = useState(false)
   const [message, setMessage] = useState('')
   const [showKey, setShowKey] = useState(false)
+  const [version, setVersion] = useState('')
+  const [updateMsg, setUpdateMsg] = useState('')
+  const [checking, setChecking] = useState(false)
+
+  useEffect(() => {
+    getVersion().then(setVersion).catch(() => {})
+  }, [])
+
+  const checkNow = async () => {
+    setChecking(true)
+    setUpdateMsg('')
+    const result = await updateNow()
+    setChecking(false)
+    if (result === 'latest') setUpdateMsg(t('up.latest'))
+    else if (result === 'failed') setUpdateMsg(t('up.failed'))
+  }
+  const channelName = (c: 'stable' | 'beta') => (c === 'beta' ? t('up.beta') : t('up.stable'))
 
   const toggleColumn = (key: ColumnKey) =>
     setSettings({ columns: settings.columns.includes(key) ? settings.columns.filter((c) => c !== key) : [...settings.columns, key] })
@@ -71,6 +90,25 @@ export function Settings({ open, onClose }: { open: boolean; onClose: () => void
               <label key={c.key}><input type="checkbox" checked={settings.columns.includes(c.key)} onChange={() => toggleColumn(c.key)} /> {t(c.label)}</label>
             ))}
           </div>
+        </section>
+
+        <section className="span">
+          <h3>{t('up.title')}</h3>
+          <p className="dim">{t('up.version', version || '…')}</p>
+          <div className="line">
+            <label>
+              {t('up.channel')}
+              <select className="field" value={settings.updateChannel}
+                onChange={(e) => setSettings({ updateChannel: e.target.value as typeof settings.updateChannel })}>
+                <option value="auto">{t('up.auto', channelName(channelFor('auto', version)))}</option>
+                <option value="stable">{t('up.stable')}</option>
+                <option value="beta">{t('up.beta')}</option>
+              </select>
+            </label>
+            <button className="btn" onClick={checkNow} disabled={checking}>{checking ? t('up.checking') : t('up.check')}</button>
+            {updateMsg && <span className="ok">{updateMsg}</span>}
+          </div>
+          <p className="faint">{t('up.help')}</p>
         </section>
 
         <section className="span">

@@ -67,20 +67,16 @@ fn register_notifications(app: &tauri::AppHandle) {
     }
 }
 
-/// Whether this copy runs in portable mode (it updates itself, not via the installer).
+/// The newer version on `channel` ("stable" or "beta"), if any.
 #[tauri::command]
-fn is_portable() -> bool {
-    portable_data_dir().is_some()
+async fn update_check(app: tauri::AppHandle, channel: String) -> Result<Option<String>, String> {
+    update::check(&app, &channel, portable_data_dir().is_some()).await
 }
 
+/// Installs the newer version on `channel` and restarts YAQS.
 #[tauri::command]
-async fn portable_update_check(app: tauri::AppHandle) -> Result<Option<String>, String> {
-    update::check(&app).await
-}
-
-#[tauri::command]
-async fn portable_update_install(app: tauri::AppHandle) -> Result<(), String> {
-    update::install(&app).await
+async fn update_install(app: tauri::AppHandle, channel: String) -> Result<(), String> {
+    update::install(&app, &channel, portable_data_dir().is_some()).await
 }
 
 #[tauri::command]
@@ -150,7 +146,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            set_watch, rules, discover, browse, players_history, is_portable, portable_update_check, portable_update_install
+            set_watch, rules, discover, browse, players_history, update_check, update_install
         ])
         .build(tauri::generate_context!())
         .expect("error while running YAQS")

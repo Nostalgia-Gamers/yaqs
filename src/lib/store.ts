@@ -30,6 +30,7 @@ const defaultSettings: Settings = {
   lang: 'auto',
   chartOpen: false,
   chartWindow: 3600,
+  updateChannel: 'auto',
 }
 
 function defaults(): State {

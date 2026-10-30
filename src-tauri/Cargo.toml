@@ -28,6 +28,7 @@ tauri-plugin-process = "2"
 semver = "1"
 minisign-verify = "0.2"
 base64 = "0.22"
+url = "2"
 
 [profile.release]
 codegen-units = 1

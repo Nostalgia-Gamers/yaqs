@@ -370,6 +370,17 @@ export const en = {
   // Updates
   'up.installing': (v: string) => `Updating to ${v}…`,
   'up.restart': 'YAQS will restart in a moment.',
+  'up.title': 'Updates',
+  'up.version': (v: string) => `You're on version ${v}.`,
+  'up.channel': 'Update channel',
+  'up.auto': (c: string) => `Automatic (${c})`,
+  'up.stable': 'Stable',
+  'up.beta': 'Beta',
+  'up.help': 'Stable gets tested releases only. Beta also gets test versions (like 0.2.0-beta.1) before everyone else, and moves on to the stable version when it comes out. YAQS never goes back to an older version.',
+  'up.check': 'Check for updates now',
+  'up.checking': 'Checking…',
+  'up.latest': "You're up to date.",
+  'up.failed': "Couldn't check for updates. Check your connection and try again.",
 
   // Right-click menu
   'cm.actions': (label: string) => `Actions for ${label}`,

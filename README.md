@@ -28,21 +28,37 @@ Always the newest version:
 
 ## Updates
 
-YAQS checks GitHub Releases when it starts and every 6 hours. If there's a newer version, it downloads it, verifies its signature against the public key built into the app, installs it and restarts:
+YAQS checks for a newer version when it starts and every 6 hours. If it finds one, it downloads it, verifies its signature against the public key built into the app, installs it and restarts:
 
 - **Installed copies** update through Tauri's updater, which runs the new installer in passive mode.
 - **Portable copies** download the new portable exe, swap their own file and keep `YAQS-data`.
 
-Pre-releases (tags like `v1.2.0-beta.1`) aren't offered to users.
+There are two channels, chosen in Settings → Updates:
+
+| Channel | Gets | Reads |
+|---|---|---|
+| **Stable** | tested releases (`v1.2.3`) | `/releases/latest/download/latest.json` (GitHub never counts a pre-release as "latest") |
+| **Beta** | pre-releases (`v1.2.3-beta.1`) first, then the stable version when it's out | `/releases/download/channel-beta/latest.json` |
+
+"Automatic" (the default) follows Beta when the running version is a pre-release, and Stable otherwise. So installing a beta once puts that PC on the beta channel. YAQS never downgrades: switching back to Stable waits for the next stable version.
 
 ## Releasing
 
-1. Merge to `master`.
-2. Tag the commit and push the tag: `git tag v1.2.3 && git push origin v1.2.3`.
-3. The **Build** workflow then:
-   - runs the checks on the org's `ci` runners;
-   - builds on `windows-latest`;
-   - publishes the release with the installer, the portable exe, their `.sig` signatures, `latest.json` (the update manifest), always-latest copies and `SHA256SUMS.txt`.
+Work happens on `develop`. `master` only gets what's ready for everyone.
+
+1. **Beta, for testing:** on `develop`, tag and push, e.g. `git tag v0.2.0-beta.1 && git push origin develop v0.2.0-beta.1`.
+   - CI publishes a pre-release and moves the beta channel to it, so beta installs update.
+   - Stable installs don't see it.
+2. **Iterate:** fix things and tag `v0.2.0-beta.2`, `-beta.3`… as needed.
+3. **Stable, for everyone:** merge `develop` into `master`, then tag the same version without the suffix: `git checkout master && git merge develop && git tag v0.2.0 && git push origin master v0.2.0`.
+   - Everyone updates, including beta installs, because `0.2.0` is newer than `0.2.0-beta.N`.
+
+For each tag, the **Build** workflow:
+- runs the checks;
+- builds on `windows-latest`;
+- publishes the release with the installer, the portable exe, their `.sig` signatures, `latest.json`, always-latest copies and `SHA256SUMS.txt`.
+
+A stable tag must point to a commit on `master`.
 
 The tag decides the version (`tools/release_version.py`, strict semver, as in nginmod). A release that already exists is never overwritten.
 

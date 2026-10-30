@@ -145,6 +145,7 @@ export interface Settings {
   lang: 'auto' | 'es-AR' | 'en'
   chartOpen: boolean
   chartWindow: number // seconds
+  updateChannel: 'auto' | 'stable' | 'beta'
 }
 
 export type View =
