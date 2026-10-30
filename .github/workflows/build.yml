@@ -11,20 +11,18 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
-# check and publish run on the organisation runners labelled ci, which spend no
-# GitHub Actions minutes. When those runners are down, set the organisation
-# variable CI_RUNNER to github and they run on GitHub-hosted runners instead.
-#
-# The Windows build cannot: the ci runners are Linux, and the app (WebView2,
-# MSVC, NSIS) is built on Windows. It runs on windows-latest, which costs
-# nothing because this repository is public.
+# Unlike the organisation's private repositories, YAQS does not use the ci
+# runners: it is public, and the Default runner group does not allow public
+# repositories, on purpose (anyone can open a pull request here, and its code
+# would run on our machines). GitHub-hosted runners are free for public
+# repositories, so every job runs on them. The app itself (WebView2, MSVC,
+# NSIS) is built on Windows; tests and checks run on Linux.
 #
 # Artifacts use GitHub's storage rather than Harbor (ci-actions/artifact): it is
-# free for public repositories and the Windows runner reaches it without the
-# Cloudflare layer limit.
+# free for public repositories and needs no registry credentials here.
 jobs:
   check:
-    runs-on: ${{ vars.CI_RUNNER == 'github' && 'ubuntu-24.04' || fromJSON('["self-hosted", "ci"]') }}
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -147,7 +145,7 @@ jobs:
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [ check, build ]
-    runs-on: ${{ vars.CI_RUNNER == 'github' && 'ubuntu-24.04' || fromJSON('["self-hosted", "ci"]') }}
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
