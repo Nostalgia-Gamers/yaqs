@@ -143,6 +143,8 @@ export interface Settings {
   sound: boolean
   steamKey: string
   lang: 'auto' | 'es-AR' | 'en'
+  chartOpen: boolean
+  chartWindow: number // seconds
 }
 
 export type View =

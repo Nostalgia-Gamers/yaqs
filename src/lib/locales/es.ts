@@ -268,7 +268,11 @@ export const es: Dict = {
   // Alertas
   'al.title': 'Alertas',
   'al.intro': 'Las alertas aparecen dentro de YAQS. Activá las notificaciones de Windows para recibirlas con la ventana en segundo plano.',
-  'al.notify': 'Notificaciones de Windows',
+  'al.notify': 'Notificaciones de Windows con YAQS en segundo plano',
+  'al.test': 'Enviar notificación de prueba',
+  'al.testTitle': 'Las notificaciones de YAQS funcionan',
+  'al.testBody': 'Vas a recibir alertas así mientras YAQS esté en segundo plano.',
+  'al.testHint': '¿No apareció nada? Revisá que No molestar esté desactivado y que YAQS esté permitido en Configuración de Windows → Sistema → Notificaciones.',
   'al.sound': 'Reproducir un sonido',
   'al.rules': 'Reglas',
   'al.enabled': 'Activada',
@@ -345,6 +349,22 @@ export const es: Dict = {
   'be.willAdd': 'Se va a agregar. Hacé clic para deshacer.',
   'be.notesPh': 'Dejalo vacío para mantener las notas de cada servidor',
   'be.clearNotes': 'Borrar las notas de todos',
+
+  // Gráfico de jugadores
+  'ch.title': 'Jugadores en el tiempo',
+  'ch.now': 'Ahora',
+  'ch.peak': 'Pico',
+  'ch.avg': 'Promedio',
+  'ch.window': 'Período',
+  'ch.minutes': (n) => `${n} min`,
+  'ch.hours': (n) => `${n} h`,
+  'ch.days': (n) => `${n} ${plural(n, 'día', 'días')}`,
+  'ch.nowLabel': 'ahora',
+  'ch.players': (n) => `${n} ${plural(n, 'jugador', 'jugadores')}`,
+  'ch.avgNote': 'promedio en esta barra',
+  'ch.gap': 'Sin datos (YAQS estaba cerrado)',
+  'ch.noData': 'Todavía no hay datos. YAQS registra los jugadores mientras está abierto.',
+  'ch.summary': (w, now, peak, avg) => `Jugadores en los últimos ${w}: ahora ${now}, pico ${peak}, promedio ${avg}.`,
 
   // Actualizaciones
   'up.installing': (v) => `Actualizando a la versión ${v}…`,

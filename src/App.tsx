@@ -13,11 +13,12 @@ import { Toasts } from './components/Toasts'
 import { BulkEdit } from './components/BulkEdit'
 import { ContextMenu } from './components/ContextMenu'
 import { OptionsMenu } from './components/OptionsMenu'
+import { PlayersChart } from './components/PlayersChart'
 import { setSettings, setView, update, useDb } from './lib/store'
 import { useLive, want } from './lib/live'
 import { useNow } from './lib/hooks'
 import { ago } from './lib/format'
-import { buildRows } from './lib/rows'
+import { buildRows, inView } from './lib/rows'
 import { useLang, useT } from './lib/i18n'
 import { toast } from './lib/alerts'
 
@@ -56,6 +57,12 @@ export function App() {
   const rows = useMemo(
     () => (listView ? buildRows(state.servers, results, state.view, query, state.settings) : []),
     [listView, state.servers, results, state.view, query, state.settings],
+  )
+
+  // The chart totals every server in the view, whatever the search or filters hide.
+  const viewAddrs = useMemo(
+    () => (listView ? state.servers.filter((s) => inView(s, state.view)).map((s) => s.addr) : []),
+    [listView, state.servers, state.view],
   )
 
   // Clear the multi-selection when the view changes.
@@ -138,8 +145,13 @@ export function App() {
                 </div>
               </div>
             )
-            : state.wall ? <Wall rows={rows} selected={selected} onSelect={setSelected} />
-            : <ServerTable rows={rows} selected={selected} onSelect={setSelected} checked={checked} setChecked={setChecked} empty={emptyText} onEdit={setEditAddrs} />}
+            : (
+              <>
+                <PlayersChart addrs={viewAddrs} />
+                {state.wall ? <Wall rows={rows} selected={selected} onSelect={setSelected} />
+                  : <ServerTable rows={rows} selected={selected} onSelect={setSelected} checked={checked} setChecked={setChecked} empty={emptyText} onEdit={setEditAddrs} />}
+              </>
+            )}
         </main>
 
         {selected && <div className="detail-slot"><Detail addr={selected} onClose={() => setSelected(null)} /></div>}

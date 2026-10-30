@@ -28,6 +28,8 @@ const defaultSettings: Settings = {
   sound: false,
   steamKey: '',
   lang: 'auto',
+  chartOpen: true,
+  chartWindow: 3600,
 }
 
 function defaults(): State {

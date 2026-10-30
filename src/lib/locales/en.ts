@@ -267,7 +267,11 @@ export const en = {
   // Alerts
   'al.title': 'Alerts',
   'al.intro': 'Alerts show inside YAQS. Turn on desktop notifications to get them while the window is in the background.',
-  'al.notify': 'Desktop notifications',
+  'al.notify': 'Windows notifications while YAQS is in the background',
+  'al.test': 'Send a test notification',
+  'al.testTitle': 'YAQS notifications work',
+  'al.testBody': "You'll get alerts like this one while YAQS is in the background.",
+  'al.testHint': 'Nothing showed up? Check that Do not disturb is off and that YAQS is allowed in Windows Settings → System → Notifications.',
   'al.sound': 'Play a sound',
   'al.rules': 'Rules',
   'al.enabled': 'Enabled',
@@ -344,6 +348,22 @@ export const en = {
   'be.willAdd': 'Will be added. Click to undo.',
   'be.notesPh': "Leave empty to keep each server's notes",
   'be.clearNotes': 'Clear notes on all',
+
+  // Players chart
+  'ch.title': 'Players over time',
+  'ch.now': 'Now',
+  'ch.peak': 'Peak',
+  'ch.avg': 'Average',
+  'ch.window': 'Time window',
+  'ch.minutes': (n: number) => `${n} min`,
+  'ch.hours': (n: number) => `${n} h`,
+  'ch.days': (n: number) => `${n} ${plural(n, 'day', 'days')}`,
+  'ch.nowLabel': 'now',
+  'ch.players': (n: number) => `${n} ${plural(n, 'player', 'players')}`,
+  'ch.avgNote': 'average in this bar',
+  'ch.gap': 'No data (YAQS was closed)',
+  'ch.noData': 'No data yet. YAQS records player counts while it runs.',
+  'ch.summary': (w: string, now: number, peak: number, avg: number) => `Players over the last ${w}: now ${now}, peak ${peak}, average ${avg}.`,
 
   // Updates
   'up.installing': (v: string) => `Updating to ${v}…`,

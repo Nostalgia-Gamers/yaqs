@@ -1,5 +1,5 @@
 import { setSettings, uid, update, useDb } from '../lib/store'
-import { clearLog, enableNotifications, useAlerts } from '../lib/alerts'
+import { clearLog, enableNotifications, testNotification, useAlerts } from '../lib/alerts'
 import { useLive } from '../lib/live'
 import { useNow } from '../lib/hooks'
 import { ago } from '../lib/format'
@@ -31,7 +31,9 @@ export function Alerts({ onSelect }: { onSelect: (addr: string) => void }) {
           <label>
             <input type="checkbox" checked={state.settings.sound} onChange={(e) => setSettings({ sound: e.target.checked })} /> {t('al.sound')}
           </label>
+          <button className="btn" onClick={() => testNotification()}>{t('al.test')}</button>
         </div>
+        <p className="faint hint">{t('al.testHint')}</p>
       </section>
 
       <section>

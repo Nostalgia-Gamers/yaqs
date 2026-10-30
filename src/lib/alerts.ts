@@ -111,6 +111,11 @@ function beep() {
   } catch { /* audio unavailable */ }
 }
 
+/** Sends a Windows notification right away, to check they show up. */
+export async function testNotification() {
+  if (await enableNotifications()) sendNotification({ title: t('al.testTitle'), body: t('al.testBody') })
+}
+
 export async function enableNotifications(): Promise<boolean> {
   if (await isPermissionGranted()) return true
   return (await requestPermission()) === 'granted'

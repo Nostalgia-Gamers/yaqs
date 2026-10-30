@@ -4,6 +4,7 @@
 
 use crate::a2s::{self, Engine};
 use crate::geo::{GeoInfo, Resolver};
+use crate::history::History;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -70,6 +71,7 @@ pub struct Poller {
 struct Inner {
     client: a2s::Client,
     geo: Option<Resolver>,
+    history: Option<Arc<History>>,
     cfg: Config,
     sem: Semaphore,
     targets: Mutex<HashMap<SocketAddr, Target>>,
@@ -77,12 +79,13 @@ struct Inner {
 }
 
 impl Poller {
-    pub fn new(client: a2s::Client, geo: Option<Resolver>, cfg: Config) -> Self {
+    pub fn new(client: a2s::Client, geo: Option<Resolver>, history: Option<Arc<History>>, cfg: Config) -> Self {
         let sem = Semaphore::new(cfg.max_inflight);
         Poller {
             inner: Arc::new(Inner {
                 client,
                 geo,
+                history,
                 cfg,
                 sem,
                 targets: Default::default(),
@@ -237,6 +240,10 @@ impl Poller {
                 }
             }
         };
+        if let Some(h) = &self.inner.history {
+            let humans = res.info.as_ref().filter(|_| res.online).map(|i| i.players.saturating_sub(i.bots)).unwrap_or(0);
+            h.record(&res.addr, ts, humans as u16);
+        }
         let res = Arc::new(res);
         t.last = Some(res.clone());
         drop(targets);
@@ -278,6 +285,7 @@ mod tests {
         let addr = fake_server(answer.clone()).await;
         let p = Poller::new(
             a2s::Client::new(Duration::from_millis(150), 0),
+            None,
             None,
             Config { min_interval: Duration::from_millis(100), max_inflight: 4, fail_threshold: 2 },
         );
