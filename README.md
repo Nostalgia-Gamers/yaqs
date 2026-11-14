@@ -8,6 +8,7 @@ It works with any game that speaks Valve's A2S protocol: GoldSrc (CS 1.6, CZ, Do
 
 - **Refresh like HLSW:** your list every 2 s (configurable) and the selected server every second. Rows flash **green** when players join or a server comes back, **red** when players leave or it goes down, and **blue** on a map change.
 - **HLSW-style info box:** ping graph with average, location (flag, country, ISP), game, players, map and next map, time left, limits, friendly fire, addons (AMX Mod X, Metamod, ReAPI, ReUnion, SourceMod…), version and contact. Players and rules (cvars) are tabs below it.
+- **Gentle on hosting providers:** queries to the same IP are evenly spaced, 5 per second by default (Settings → Refresh), so providers that rate-limit UDP don't drop them and make servers look down.
 - **Two languages:** Español (Argentina) and English. YAQS follows the Windows language by default; change it under ⚙ Options → Language.
 - **Right-click menu:** connect, show details, copy the address or the `connect` command, favorite, move to a category, edit, remove. It acts on the clicked server or on the whole selection.
 - **Bulk edit:** select several servers and use Edit to change category, favorite, reserved slots, tags or notes at once. Fields you don't touch keep each server's value.

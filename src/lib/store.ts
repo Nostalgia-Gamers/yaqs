@@ -31,6 +31,7 @@ const defaultSettings: Settings = {
   chartOpen: false,
   chartWindow: 3600,
   updateChannel: 'auto',
+  queryRate: 5,
 }
 
 function defaults(): State {

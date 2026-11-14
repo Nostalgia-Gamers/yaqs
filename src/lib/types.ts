@@ -146,6 +146,7 @@ export interface Settings {
   chartOpen: boolean
   chartWindow: number // seconds
   updateChannel: 'auto' | 'stable' | 'beta'
+  queryRate: number // most queries per second to one IP; 0 = no limit
 }
 
 export type View =

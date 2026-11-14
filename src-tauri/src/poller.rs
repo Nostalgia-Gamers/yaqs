@@ -5,9 +5,10 @@
 use crate::a2s::{self, Engine};
 use crate::geo::{GeoInfo, Resolver};
 use crate::history::History;
+use crate::throttle::HostLimiter;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::Semaphore;
@@ -72,6 +73,7 @@ struct Inner {
     client: a2s::Client,
     geo: Option<Resolver>,
     history: Option<Arc<History>>,
+    limiter: Arc<HostLimiter>,
     cfg: Config,
     sem: Semaphore,
     targets: Mutex<HashMap<SocketAddr, Target>>,
@@ -79,13 +81,20 @@ struct Inner {
 }
 
 impl Poller {
-    pub fn new(client: a2s::Client, geo: Option<Resolver>, history: Option<Arc<History>>, cfg: Config) -> Self {
+    pub fn new(
+        client: a2s::Client,
+        geo: Option<Resolver>,
+        history: Option<Arc<History>>,
+        limiter: Arc<HostLimiter>,
+        cfg: Config,
+    ) -> Self {
         let sem = Semaphore::new(cfg.max_inflight);
         Poller {
             inner: Arc::new(Inner {
                 client,
                 geo,
                 history,
+                limiter,
                 cfg,
                 sem,
                 targets: Default::default(),
@@ -111,6 +120,22 @@ impl Poller {
         let now = Instant::now();
         let mut targets = self.inner.targets.lock().unwrap();
         targets.retain(|a, _| want.contains_key(a));
+
+        // New servers on the same IP get their first query spread evenly over
+        // their interval, so they stay spread out instead of all firing at once.
+        let mut fresh: HashMap<IpAddr, Vec<SocketAddr>> = HashMap::new();
+        for addr in want.keys().filter(|a| !targets.contains_key(a)) {
+            fresh.entry(addr.ip()).or_default().push(*addr);
+        }
+        let mut offset: HashMap<SocketAddr, Duration> = HashMap::new();
+        for addrs in fresh.values_mut() {
+            addrs.sort();
+            let n = addrs.len() as u32;
+            for (i, a) in addrs.iter().enumerate() {
+                offset.insert(*a, want[a] * i as u32 / n);
+            }
+        }
+
         for (addr, iv) in want {
             match targets.get_mut(&addr) {
                 Some(t) => {
@@ -121,11 +146,10 @@ impl Poller {
                     t.interval = iv;
                 }
                 None => {
-                    // Spread first queries so a big list doesn't burst at once.
-                    let spread = iv.min(Duration::from_secs(1)).as_millis() as u64;
+                    let jitter = Duration::from_millis(fastrand::u64(0..=100));
                     targets.insert(addr, Target {
                         interval: iv,
-                        next: now + Duration::from_millis(fastrand::u64(0..=spread)),
+                        next: now + offset.get(&addr).copied().unwrap_or_default() + jitter,
                         busy: false,
                         fails: 0,
                         engine: Engine::Unknown,
@@ -140,6 +164,7 @@ impl Poller {
     /// A2S_RULES on demand, using the engine learnt from polling.
     pub async fn rules(&self, addr: SocketAddr) -> Result<Vec<a2s::Rule>, a2s::Error> {
         let eng = self.inner.targets.lock().unwrap().get(&addr).map(|t| t.engine).unwrap_or(Engine::Unknown);
+        self.inner.limiter.take(addr.ip()).await;
         let _permit = self.inner.sem.acquire().await.expect("semaphore open");
         self.inner.client.rules(addr, eng).await
     }
@@ -164,12 +189,17 @@ impl Poller {
             let now = Instant::now();
             let due: Vec<SocketAddr> = {
                 let mut targets = self.inner.targets.lock().unwrap();
-                targets
-                    .iter_mut()
-                    .filter(|(_, t)| !t.busy && t.next <= now)
-                    .map(|(a, t)| {
-                        t.busy = true;
-                        *a
+                // Longest-waiting first; a server whose IP is out of tokens
+                // stays due and goes out on a later tick.
+                let mut ready: Vec<(Instant, SocketAddr)> =
+                    targets.iter().filter(|(_, t)| !t.busy && t.next <= now).map(|(a, t)| (t.next, *a)).collect();
+                ready.sort();
+                ready
+                    .into_iter()
+                    .filter(|(_, a)| self.inner.limiter.try_take(a.ip(), now))
+                    .map(|(_, a)| {
+                        targets.get_mut(&a).expect("still watched").busy = true;
+                        a
                     })
                     .collect()
             };
@@ -287,6 +317,7 @@ mod tests {
             a2s::Client::new(Duration::from_millis(150), 0),
             None,
             None,
+            Arc::new(HostLimiter::new(0.0)),
             Config { min_interval: Duration::from_millis(100), max_inflight: 4, fail_threshold: 2 },
         );
         let got: Arc<Mutex<Vec<Arc<ServerResult>>>> = Default::default();
@@ -318,5 +349,42 @@ mod tests {
 
         p.set_watch(vec![]);
         assert!(p.inner.targets.lock().unwrap().is_empty());
+    }
+
+    /// Ten servers on one IP with a 5/s limit: queries go out one every 200 ms,
+    /// and every server is still polled soon after.
+    #[tokio::test]
+    async fn throttles_queries_per_ip() {
+        let answer = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let mut addrs = Vec::new();
+        for _ in 0..10 {
+            addrs.push(fake_server(answer.clone()).await);
+        }
+        let p = Poller::new(
+            a2s::Client::new(Duration::from_millis(300), 0),
+            None,
+            None,
+            Arc::new(HostLimiter::new(5.0)),
+            Config { min_interval: Duration::from_millis(100), max_inflight: 64, fail_threshold: 2 },
+        );
+        let got: Arc<Mutex<Vec<(Instant, Arc<ServerResult>)>>> = Default::default();
+        let sink_got = got.clone();
+        tokio::spawn(p.clone().run(Arc::new(move |b| {
+            let now = Instant::now();
+            sink_got.lock().unwrap().extend(b.into_iter().map(|r| (now, r)));
+        })));
+        let start = Instant::now();
+        // A short interval, so without the limit all ten would go out at once.
+        p.set_watch(addrs.iter().map(|a| WatchItem { addr: a.to_string(), interval: 0.1 }).collect());
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let early: std::collections::HashSet<String> = got.lock().unwrap().iter()
+            .filter(|(at, _)| at.duration_since(start) < Duration::from_millis(500)).map(|(_, r)| r.addr.clone()).collect();
+        assert!(early.len() <= 4, "{} servers polled in the first half second; 5/s spaced allows about 3", early.len());
+
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        let all: std::collections::HashSet<String> = got.lock().unwrap().iter().map(|(_, r)| r.addr.clone()).collect();
+        assert_eq!(all.len(), 10, "every server is still polled");
+        assert!(got.lock().unwrap().iter().all(|(_, r)| r.online), "waiting for a turn is not a failure");
     }
 }

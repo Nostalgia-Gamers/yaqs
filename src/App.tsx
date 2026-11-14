@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { invoke } from '@tauri-apps/api/core'
 import { Sidebar } from './components/Sidebar'
 import { ServerTable } from './components/ServerTable'
 import { Detail } from './components/Detail'
@@ -52,6 +53,9 @@ export function App() {
   useEffect(() => {
     want('focus', selected ? [selected] : [], 1)
   }, [selected])
+  useEffect(() => {
+    invoke('set_query_rate', { perSecond: state.settings.queryRate }).catch(() => {})
+  }, [state.settings.queryRate])
 
   const listView = LIST_VIEWS.includes(state.view.kind)
   const rows = useMemo(
@@ -69,20 +73,6 @@ export function App() {
   useEffect(() => setChecked([]), [state.view])
 
   // The window title shows live totals, like a tab on a second screen.
-  const totals = useMemo(() => {
-    let players = 0, down = 0
-    for (const s of state.servers) {
-      const r = results.get(s.addr)
-      if (!r) continue
-      if (r.online) players += (r.info?.players ?? 0) - (r.info?.bots ?? 0)
-      else down++
-    }
-    return { players, down }
-  }, [state.servers, results])
-  useEffect(() => {
-    getCurrentWindow().setTitle(`${totals.down ? `⚠${totals.down} ` : ''}(${totals.players}) YAQS`).catch(() => {})
-  }, [totals.players, totals.down])
-
   const v = state.view
   const title =
     v.kind === 'all' ? t('view.all')
@@ -93,6 +83,24 @@ export function App() {
       : v.kind === 'browse' ? t('view.browse')
       : v.kind === 'buddies' ? t('view.buddies')
       : t('view.alerts')
+
+  // The window title counts the servers of the view on screen (a category, a
+  // tag, favorites…); views without a server list count every saved server.
+  const totals = useMemo(() => {
+    const addrs = listView ? viewAddrs : state.servers.map((s) => s.addr)
+    let players = 0, down = 0
+    for (const a of addrs) {
+      const r = results.get(a)
+      if (!r) continue
+      if (r.online) players += (r.info?.players ?? 0) - (r.info?.bots ?? 0)
+      else down++
+    }
+    return { players, down }
+  }, [listView, viewAddrs, state.servers, results])
+  const windowTitle = `${totals.down ? `⚠${totals.down} ` : ''}(${totals.players}) ${listView ? `${title} · ` : ''}YAQS`
+  useEffect(() => {
+    getCurrentWindow().setTitle(windowTitle).catch(() => {})
+  }, [windowTitle])
 
   const st = state.settings
   const emptyText = query ? t('empty.query', query)

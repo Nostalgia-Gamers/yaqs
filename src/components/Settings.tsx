@@ -24,6 +24,7 @@ const columns: { key: ColumnKey; label: 'col.status' | 'col.password' | 'col.vac
 export function Settings({ open, onClose }: { open: boolean; onClose: () => void }) {
   const t = useT()
   const settings = useDb((s) => s.settings)
+  const servers = useDb((s) => s.servers)
   const storageOk = useStorageOk()
   const [replace, setReplace] = useState(false)
   const [message, setMessage] = useState('')
@@ -45,6 +46,17 @@ export function Settings({ open, onClose }: { open: boolean; onClose: () => void
     else if (result === 'failed') setUpdateMsg(t('up.failed'))
   }
   const channelName = (c: 'stable' | 'beta') => (c === 'beta' ? t('up.beta') : t('up.stable'))
+
+  // With a per-IP limit, the IP with the most servers sets how often each of them can refresh.
+  const busiest = (() => {
+    const perIp = new Map<string, number>()
+    for (const s of servers) {
+      const ip = s.addr.slice(0, s.addr.lastIndexOf(':'))
+      perIp.set(ip, (perIp.get(ip) ?? 0) + 1)
+    }
+    return Math.max(0, ...perIp.values())
+  })()
+  const throttledEvery = settings.queryRate > 0 ? Math.ceil(busiest / settings.queryRate) : 0
 
   const toggleColumn = (key: ColumnKey) =>
     setSettings({ columns: settings.columns.includes(key) ? settings.columns.filter((c) => c !== key) : [...settings.columns, key] })
@@ -77,6 +89,15 @@ export function Settings({ open, onClose }: { open: boolean; onClose: () => void
             </select>
           </label>
           <p className="faint">{t('st.refreshHelp')}</p>
+          <label className="line">
+            {t('st.rate')}
+            <select className="field" value={settings.queryRate} onChange={(e) => setSettings({ queryRate: Number(e.target.value) })}>
+              {[1, 2, 3, 5, 10, 20].map((n) => <option key={n} value={n}>{n}</option>)}
+              <option value={0}>{t('st.rateNone')}</option>
+            </select>
+          </label>
+          <p className="faint">{t('st.rateHelp')}</p>
+          {throttledEvery > settings.interval && <p className="warn">{t('st.rateEffect', busiest, throttledEvery)}</p>}
         </section>
 
         <section className="span">

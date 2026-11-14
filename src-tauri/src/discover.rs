@@ -4,6 +4,7 @@
 use crate::a2s;
 use crate::addr;
 use crate::poller::{now_ms, ServerResult};
+use crate::throttle::HostLimiter;
 use serde::Serialize;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -28,7 +29,7 @@ const PARALLEL: usize = 32;
 /// With an explicit port list every port is returned (offline ones too, so a
 /// server that's down right now can still be added); a scan returns only the
 /// servers that answered.
-pub async fn discover(input: String) -> Discovery {
+pub async fn discover(input: String, limiter: Arc<HostLimiter>) -> Discovery {
     let mut d = Discovery { input: input.clone(), host: None, scan: false, servers: vec![], error: None };
     let target = match addr::parse_target(&input) {
         Ok(t) => t,
@@ -62,7 +63,10 @@ pub async fn discover(input: String) -> Discovery {
         let addr = SocketAddr::new(ip, port);
         let client = client.clone();
         let slots = slots.clone();
+        let limiter = limiter.clone();
         set.spawn(async move {
+            // Probes count against the IP's query limit like any other query.
+            limiter.take(addr.ip()).await;
             let _permit = slots.acquire_owned().await.ok();
             (addr, client.info(addr).await)
         });

@@ -5,6 +5,7 @@ mod geo;
 mod history;
 mod master;
 mod poller;
+mod throttle;
 mod update;
 
 use std::path::PathBuf;
@@ -16,7 +17,11 @@ struct AppState {
     poller: poller::Poller,
     master: master::Client,
     history: Arc<history::History>,
+    limiter: Arc<throttle::HostLimiter>,
 }
+
+/// Default queries per second to the same IP (Settings can change it).
+const DEFAULT_QUERY_RATE: f64 = 5.0;
 
 /// Replaces the set of watched servers, each with its own interval (s).
 /// Results arrive as "updates" events. Returns refused addresses.
@@ -32,8 +37,14 @@ async fn rules(state: State<'_, AppState>, addr: String) -> Result<Vec<a2s::Rule
 }
 
 #[tauri::command]
-async fn discover(input: String) -> discover::Discovery {
-    discover::discover(input).await
+async fn discover(state: State<'_, AppState>, input: String) -> Result<discover::Discovery, String> {
+    Ok(discover::discover(input, state.limiter.clone()).await)
+}
+
+/// Sets the most queries per second sent to one IP (0 = no limit).
+#[tauri::command]
+fn set_query_rate(state: State<'_, AppState>, per_second: f64) {
+    state.limiter.set_rate(per_second.clamp(0.0, 1000.0));
 }
 
 /// Total players of `addrs` over the last `window` seconds, in `bars` bars.
@@ -121,10 +132,12 @@ pub fn run() {
                 }
             });
 
+            let limiter = Arc::new(throttle::HostLimiter::new(DEFAULT_QUERY_RATE));
             let poller = poller::Poller::new(
                 a2s::Client::new(Duration::from_millis(1500), 1),
                 Some(geo),
                 Some(history.clone()),
+                limiter.clone(),
                 poller::Config { min_interval: Duration::from_secs(1), max_inflight: 256, fail_threshold: 2 },
             );
             let handle = app.handle().clone();
@@ -133,7 +146,7 @@ pub fn run() {
             });
             tauri::async_runtime::spawn(poller.clone().run(sink));
 
-            app.manage(AppState { poller, master: master::Client::new(), history });
+            app.manage(AppState { poller, master: master::Client::new(), history, limiter });
 
             let mut window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title("YAQS")
@@ -146,7 +159,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            set_watch, rules, discover, browse, players_history, update_check, update_install
+            set_watch, rules, discover, browse, players_history, set_query_rate, update_check, update_install
         ])
         .build(tauri::generate_context!())
         .expect("error while running YAQS")
