@@ -2,6 +2,7 @@
 
 use serde::Serialize;
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::fmt;
 use std::future::Future;
 use std::io::Read;
@@ -111,15 +112,41 @@ const NO_CHALLENGE: [u8; 4] = [0xFF; 4];
 
 /// Sends A2S queries. Each query gets its own connected socket, so a late
 /// reply to one query can never be read as the answer to another.
+///
+/// Challenge numbers are remembered per server: a server hands the same one
+/// to the same client for a while, so a player or rules query sends it right
+/// away and costs one request instead of two. A stale one just gets a new
+/// challenge back, which is used and remembered.
 #[derive(Clone)]
 pub struct Client {
     pub timeout: Duration,
     pub retries: u32,
+    challenges: Arc<Mutex<Challenges>>,
+}
+
+#[derive(Default)]
+struct Challenges {
+    /// For A2S_PLAYER and A2S_RULES.
+    query: HashMap<SocketAddr, [u8; 4]>,
+    /// For A2S_INFO, only for servers that asked for one: older GoldSrc
+    /// servers answer INFO directly and must keep getting the plain request.
+    info: HashMap<SocketAddr, [u8; 4]>,
 }
 
 impl Client {
     pub fn new(timeout: Duration, retries: u32) -> Self {
-        Client { timeout, retries }
+        Client { timeout, retries, challenges: Default::default() }
+    }
+
+    fn cached(&self, addr: SocketAddr, info: bool) -> Option<[u8; 4]> {
+        let c = self.challenges.lock().unwrap();
+        if info { c.info.get(&addr).copied() } else { c.query.get(&addr).copied() }
+    }
+
+    fn remember(&self, addr: SocketAddr, info: bool, challenge: Option<[u8; 4]>) {
+        let Some(ch) = challenge.filter(|c| *c != NO_CHALLENGE) else { return };
+        let mut c = self.challenges.lock().unwrap();
+        if info { c.info.insert(addr, ch) } else { c.query.insert(addr, ch) };
     }
 
     /// A2S_INFO. The returned duration is the round trip of the last request
@@ -129,7 +156,8 @@ impl Client {
             let mut s = Session::open(addr, self.timeout, Engine::Unknown).await?;
             let mut req = header(b'T');
             req.extend_from_slice(b"Source Engine Query\0");
-            let (resp, rtt) = s.challenged(&req, None, &[b'I', b'm']).await?;
+            let (resp, rtt, used) = s.challenged(&req, self.cached(addr, true), &[b'I', b'm']).await?;
+            self.remember(addr, true, used);
             Ok((parse_info(&resp)?, rtt))
         })
         .await
@@ -138,7 +166,9 @@ impl Client {
     pub async fn players(&self, addr: SocketAddr, eng: Engine) -> Res<Vec<Player>> {
         self.retry(|| async move {
             let mut s = Session::open(addr, self.timeout, eng).await?;
-            let (resp, _) = s.challenged(&header(b'U'), Some(NO_CHALLENGE), &[b'D']).await?;
+            let first = self.cached(addr, false).unwrap_or(NO_CHALLENGE);
+            let (resp, _, used) = s.challenged(&header(b'U'), Some(first), &[b'D']).await?;
+            self.remember(addr, false, used);
             parse_players(&resp)
         })
         .await
@@ -148,7 +178,9 @@ impl Client {
     pub async fn rules(&self, addr: SocketAddr, eng: Engine) -> Res<Vec<Rule>> {
         self.retry(|| async move {
             let mut s = Session::open(addr, self.timeout, eng).await?;
-            let (resp, _) = s.challenged(&header(b'V'), Some(NO_CHALLENGE), &[b'E']).await?;
+            let first = self.cached(addr, false).unwrap_or(NO_CHALLENGE);
+            let (resp, _, used) = s.challenged(&header(b'V'), Some(first), &[b'E']).await?;
+            self.remember(addr, false, used);
             parse_rules(&resp)
         })
         .await
@@ -198,19 +230,22 @@ impl Session {
     }
 
     /// Sends req (+challenge) and follows S2C_CHALLENGE replies until one of
-    /// the expected response types arrives.
-    async fn challenged(&mut self, req: &[u8], challenge: Option<[u8; 4]>, expect: &[u8]) -> Res<(Vec<u8>, Duration)> {
-        let mut sent = self.send(req, challenge).await?;
+    /// the expected response types arrives. Also returns the challenge the
+    /// answered request carried, for the next query.
+    async fn challenged(&mut self, req: &[u8], challenge: Option<[u8; 4]>, expect: &[u8]) -> Res<(Vec<u8>, Duration, Option<[u8; 4]>)> {
+        let mut used = challenge;
+        let mut sent = self.send(req, used).await?;
         let (mut challenges, mut stray) = (0, 0);
         loop {
             let resp = self.recv().await?;
             let Some(&kind) = resp.first() else { continue };
             if expect.contains(&kind) {
-                return Ok((resp, sent.elapsed()));
+                return Ok((resp, sent.elapsed(), used));
             }
             if kind == b'A' && resp.len() >= 5 && challenges < 2 {
                 challenges += 1;
-                sent = self.send(req, Some([resp[1], resp[2], resp[3], resp[4]])).await?;
+                used = Some([resp[1], resp[2], resp[3], resp[4]]);
+                sent = self.send(req, used).await?;
                 continue;
             }
             stray += 1;
@@ -745,6 +780,59 @@ mod tests {
         })
         .await;
         check_rules(&client().rules(addr, Engine::Unknown).await.unwrap());
+    }
+
+    /// The second player query reuses the challenge (1 request instead of 2);
+    /// when the server changes it, the query still succeeds.
+    #[tokio::test]
+    async fn remembers_challenges() {
+        use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
+        let requests = Arc::new(AtomicU32::new(0));
+        let current = Arc::new(AtomicU8::new(0x11));
+        let (r, c) = (requests.clone(), current.clone());
+        let addr = fake(move |req| {
+            r.fetch_add(1, Ordering::SeqCst);
+            let ch = [c.load(Ordering::SeqCst), 0x22, 0x33, 0x44];
+            if req.ends_with(&ch) {
+                vec![Pkt::single().u8(b'D').u8(1).u8(0).s("Shiobi").i32(3).f32(10.0).0]
+            } else {
+                vec![Pkt::single().u8(b'A').raw(&ch).0]
+            }
+        })
+        .await;
+        let c = client();
+        assert_eq!(c.players(addr, Engine::GoldSrc).await.unwrap().len(), 1);
+        assert_eq!(requests.swap(0, Ordering::SeqCst), 2, "first query: ask for a challenge, then use it");
+        assert_eq!(c.players(addr, Engine::GoldSrc).await.unwrap().len(), 1);
+        assert_eq!(requests.swap(0, Ordering::SeqCst), 1, "second query: the remembered challenge goes straight out");
+        current.store(0x55, Ordering::SeqCst);
+        assert_eq!(c.players(addr, Engine::GoldSrc).await.unwrap().len(), 1);
+        assert_eq!(requests.swap(0, Ordering::SeqCst), 2, "stale challenge: one extra round trip, then it works");
+    }
+
+    /// A server that never asked for an INFO challenge keeps getting the
+    /// plain request, even after a player query learned a challenge.
+    #[tokio::test]
+    async fn plain_info_stays_plain() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let saw_suffix = Arc::new(AtomicBool::new(false));
+        let s = saw_suffix.clone();
+        let addr = fake(move |req| match req[4] {
+            b'T' => {
+                if !req.ends_with(b"Source Engine Query\0") {
+                    s.store(true, Ordering::SeqCst);
+                }
+                vec![Pkt::single().u8(b'I').u8(48).s("Old").s("de_nuke").s("cstrike").s("Counter-Strike")
+                    .u16(10).u8(1).u8(16).u8(0).u8(b'd').u8(b'l').u8(0).u8(1).s("1.1.2.7").0]
+            }
+            _ => gate(req, || vec![Pkt::single().u8(b'D').u8(0).0]),
+        })
+        .await;
+        let c = client();
+        c.players(addr, Engine::GoldSrc).await.unwrap();
+        c.info(addr).await.unwrap();
+        c.info(addr).await.unwrap();
+        assert!(!saw_suffix.load(Ordering::SeqCst), "INFO must not carry a challenge the server never asked for");
     }
 
     #[tokio::test]

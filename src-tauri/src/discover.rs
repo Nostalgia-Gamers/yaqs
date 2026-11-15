@@ -80,6 +80,7 @@ pub async fn discover(input: String, limiter: Arc<HostLimiter>) -> Discovery {
             ping: 0,
             info: None,
             players: vec![],
+            players_at: None,
             geo: None,
             error: None,
             ts,

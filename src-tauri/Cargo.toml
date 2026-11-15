@@ -1,6 +1,6 @@
 [package]
 name = "yaqs"
-version = "0.1.1"
+version = "0.1.2"
 description = "Yet Another Query Server: live game server watcher"
 edition = "2021"
 

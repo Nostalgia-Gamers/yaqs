@@ -25,6 +25,9 @@ import { toast } from './lib/alerts'
 
 const LIST_VIEWS = ['all', 'favorites', 'uncategorized', 'category', 'tag']
 
+/** Seconds between player-list checks for buddies: a join can wait that long. */
+const BUDDY_PLAYERS_EVERY = 10
+
 export function App() {
   const t = useT()
   const lang = useLang()
@@ -48,10 +51,13 @@ export function App() {
   // Like HLSW: every saved server at the chosen interval, the selected one every second.
   const addrKey = state.servers.map((s) => s.addr).join(',')
   useEffect(() => {
-    want('saved', addrKey ? addrKey.split(',') : [], state.settings.interval)
-  }, [addrKey, state.settings.interval])
+    // Player lists: every poll while searching (it matches player names),
+    // every 10 s when there are buddies to spot, otherwise not at all.
+    const players = query.trim() ? 0 : state.buddies.length ? BUDDY_PLAYERS_EVERY : null
+    want('saved', addrKey ? addrKey.split(',') : [], state.settings.interval, players)
+  }, [addrKey, state.settings.interval, query, state.buddies.length])
   useEffect(() => {
-    want('focus', selected ? [selected] : [], 1)
+    want('focus', selected ? [selected] : [], 1, 0)
   }, [selected])
   useEffect(() => {
     invoke('set_query_rate', { perSecond: state.settings.queryRate }).catch(() => {})

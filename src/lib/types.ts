@@ -53,6 +53,8 @@ export interface Result {
   error?: string
   ts: number
   lastSeen?: number
+  /** When `players` was fetched; absent until a list has been fetched. */
+  playersAt?: number
 }
 
 export interface BrowseFilter {

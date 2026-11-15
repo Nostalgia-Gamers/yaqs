@@ -73,21 +73,31 @@ export function startLive() {
 
 // Each owner (e.g. 'saved', 'focus', 'browse') wants addresses at some
 // interval; Rust watches the union, each at the fastest interval asked for.
-const wanted = new Map<string, { addrs: string[]; interval: number }>()
+// Player lists cost two more packets per server, so each owner also says how
+// often it needs them: 0 = every poll (the selected server, a search by player
+// name), N seconds (buddies), or null = never (the list itself only needs INFO).
+const wanted = new Map<string, { addrs: string[]; interval: number; players: number | null }>()
 let syncTimer: ReturnType<typeof setTimeout> | undefined
 
-export function want(owner: string, addrs: string[], interval: number) {
-  wanted.set(owner, { addrs, interval })
+export function want(owner: string, addrs: string[], interval: number, players: number | null = null) {
+  wanted.set(owner, { addrs, interval, players })
   clearTimeout(syncTimer)
   syncTimer = setTimeout(sync, 30)
 }
 
 async function sync() {
-  const desired = new Map<string, number>()
-  for (const { addrs, interval } of wanted.values()) {
-    for (const a of addrs) desired.set(a, Math.min(desired.get(a) ?? Infinity, interval))
+  const desired = new Map<string, { interval: number; players: number | null }>()
+  for (const { addrs, interval, players } of wanted.values()) {
+    for (const a of addrs) {
+      const d = desired.get(a)
+      const p = d?.players ?? null
+      desired.set(a, {
+        interval: Math.min(d?.interval ?? Infinity, interval),
+        players: players === null ? p : p === null ? players : Math.min(p, players),
+      })
+    }
   }
-  const items = [...desired].map(([addr, interval]) => ({ addr, interval }))
+  const items = [...desired].map(([addr, d]) => ({ addr, interval: d.interval, players: d.players }))
   const rejected = await invoke<string[]>('set_watch', { items })
 
   // Forget results for servers nobody watches any more.

@@ -62,7 +62,9 @@ function check(prev: Result | undefined, next: Result) {
     }
   }
 
-  if (db().buddies.length && next.online) {
+  // Compare two fetched lists only: the first list a server gets is a
+  // baseline, not a crowd of buddies who all "just joined".
+  if (db().buddies.length && next.online && prev.playersAt && next.playersAt && next.playersAt > prev.playersAt) {
     const before = new Set(prev.players.map((p) => p.name))
     for (const p of next.players) {
       if (!before.has(p.name) && buddyMatch(p.name)) fire(t('ev.joined', p.name), `${name} (${next.info?.map ?? ''})`, next.addr)

@@ -24,6 +24,10 @@ pub struct ServerResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub info: Option<a2s::Info>,
     pub players: Vec<a2s::Player>,
+    /// Unix ms when `players` was last fetched (or known empty). None until a
+    /// list has been fetched: the UI must not read a missing list as "nobody".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub players_at: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub geo: Option<Arc<GeoInfo>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -44,6 +48,10 @@ pub struct WatchItem {
     pub addr: String,
     /// Seconds between polls.
     pub interval: f64,
+    /// Seconds between player-list fetches (0 = every poll), or null to skip
+    /// them: the list view only needs A2S_INFO, one packet each way.
+    #[serde(default)]
+    pub players: Option<f64>,
 }
 
 pub type Sink = Arc<dyn Fn(Vec<Arc<ServerResult>>) + Send + Sync>;
@@ -51,6 +59,9 @@ pub type Sink = Arc<dyn Fn(Vec<Arc<ServerResult>>) + Send + Sync>;
 struct Target {
     interval: Duration,
     next: Instant,
+    /// How often to fetch the player list; None = never.
+    players_every: Option<Duration>,
+    players_next: Instant,
     busy: bool,
     fails: u32,
     engine: Engine,
@@ -107,6 +118,7 @@ impl Poller {
     pub fn set_watch(&self, items: Vec<WatchItem>) -> Vec<String> {
         let mut rejected = Vec::new();
         let mut want: HashMap<SocketAddr, Duration> = HashMap::new();
+        let mut players: HashMap<SocketAddr, Duration> = HashMap::new();
         for it in items {
             let Some(addr) = crate::addr::parse_addr(&it.addr) else {
                 rejected.push(it.addr);
@@ -115,6 +127,11 @@ impl Poller {
             let iv = Duration::from_secs_f64(it.interval.clamp(0.0, 600.0)).max(self.inner.cfg.min_interval);
             let e = want.entry(addr).or_insert(iv);
             *e = (*e).min(iv);
+            if let Some(every) = it.players {
+                let every = Duration::from_secs_f64(every.clamp(0.0, 3600.0));
+                let e = players.entry(addr).or_insert(every);
+                *e = (*e).min(every);
+            }
         }
 
         let now = Instant::now();
@@ -144,12 +161,21 @@ impl Poller {
                         t.next = now;
                     }
                     t.interval = iv;
+                    let every = players.get(&addr).copied();
+                    // Player lists just became wanted, or wanted sooner (a
+                    // search started): fetch on the next poll.
+                    if every.is_some() && (t.players_every.is_none() || every < t.players_every) {
+                        t.players_next = now;
+                    }
+                    t.players_every = every;
                 }
                 None => {
                     let jitter = Duration::from_millis(fastrand::u64(0..=100));
                     targets.insert(addr, Target {
                         interval: iv,
                         next: now + offset.get(&addr).copied().unwrap_or_default() + jitter,
+                        players_every: players.get(&addr).copied(),
+                        players_next: now,
                         busy: false,
                         fails: 0,
                         engine: Engine::Unknown,
@@ -210,11 +236,15 @@ impl Poller {
     }
 
     async fn poll(self, addr: SocketAddr) {
+        let want_players = {
+            let targets = self.inner.targets.lock().unwrap();
+            targets.get(&addr).is_some_and(|t| t.players_every.is_some() && t.players_next <= Instant::now())
+        };
         let (info, players) = {
             let _permit = self.inner.sem.acquire().await.expect("semaphore open");
             let info = self.inner.client.info(addr).await;
             let players = match &info {
-                Ok((i, _)) if i.players > 0 => Some(self.inner.client.players(addr, i.engine_kind()).await),
+                Ok((i, _)) if i.players > 0 && want_players => Some(self.inner.client.players(addr, i.engine_kind()).await),
                 _ => None,
             };
             (info, players)
@@ -242,6 +272,7 @@ impl Poller {
                     ping: 0,
                     info: t.last.as_ref().and_then(|l| l.info.clone()),
                     players: vec![],
+                    players_at: None,
                     geo,
                     error: Some(e.to_string()),
                     ts,
@@ -251,11 +282,17 @@ impl Poller {
             Ok((info, rtt)) => {
                 t.fails = 0;
                 t.engine = info.engine_kind();
-                let players = match players {
-                    Some(Ok(p)) => p,
+                if players.is_some() {
+                    t.players_next = now + t.players_every.unwrap_or_default();
+                }
+                let previous = || t.last.as_ref().map(|l| (l.players.clone(), l.players_at)).unwrap_or_default();
+                let (players, players_at) = match players {
+                    Some(Ok(p)) => (p, Some(ts)),
                     // Keep the previous list rather than flicker to empty.
-                    Some(Err(_)) => t.last.as_ref().map(|l| l.players.clone()).unwrap_or_default(),
-                    None => vec![],
+                    Some(Err(_)) => previous(),
+                    // Not fetched this time: nobody on (a known-empty list), or not due yet.
+                    None if info.players == 0 => (vec![], Some(ts)),
+                    None => previous(),
                 };
                 ServerResult {
                     addr: addr.to_string(),
@@ -263,6 +300,7 @@ impl Poller {
                     ping: rtt.as_millis() as u32,
                     info: Some(info),
                     players,
+                    players_at,
                     geo,
                     error: None,
                     ts,
@@ -325,8 +363,8 @@ mod tests {
         tokio::spawn(p.clone().run(Arc::new(move |b| sink_got.lock().unwrap().extend(b))));
 
         let rejected = p.set_watch(vec![
-            WatchItem { addr: addr.to_string(), interval: 0.2 },
-            WatchItem { addr: "0.0.0.0:1".into(), interval: 1.0 },
+            WatchItem { addr: addr.to_string(), interval: 0.2, players: Some(0.0) },
+            WatchItem { addr: "0.0.0.0:1".into(), interval: 1.0, players: None },
         ]);
         assert_eq!(rejected, vec!["0.0.0.0:1".to_string()]);
 
@@ -349,6 +387,80 @@ mod tests {
 
         p.set_watch(vec![]);
         assert!(p.inner.targets.lock().unwrap().is_empty());
+    }
+
+    /// A fake server with 3 players; counts the A2S_PLAYER requests it gets.
+    async fn fake_with_players(player_requests: Arc<std::sync::atomic::AtomicU32>) -> SocketAddr {
+        let sock = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let addr = sock.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut buf = [0u8; 1500];
+            while let Ok((n, from)) = sock.recv_from(&mut buf).await {
+                let req = &buf[..n];
+                let mut p = vec![0xFF, 0xFF, 0xFF, 0xFF];
+                if req[4] == b'T' {
+                    p.extend_from_slice(&[b'I', 48]);
+                    for s in ["Busy", "de_dust2", "cstrike", "Counter-Strike"] {
+                        p.extend_from_slice(s.as_bytes());
+                        p.push(0);
+                    }
+                    p.extend_from_slice(&10u16.to_le_bytes());
+                    p.extend_from_slice(&[3, 32, 0, b'd', b'l', 0, 1]);
+                    p.extend_from_slice(b"1.1.2.7\0");
+                } else {
+                    player_requests.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    if req.ends_with(&[1, 2, 3, 4]) {
+                        p.extend_from_slice(&[b'D', 1, 0]);
+                        p.extend_from_slice(b"Shiobi\0");
+                        p.extend_from_slice(&5i32.to_le_bytes());
+                        p.extend_from_slice(&1.0f32.to_le_bytes());
+                    } else {
+                        p.extend_from_slice(&[b'A', 1, 2, 3, 4]);
+                    }
+                }
+                let _ = sock.send_to(&p, from).await;
+            }
+        });
+        addr
+    }
+
+    /// Player lists are fetched only when asked for, and at most as often as asked.
+    #[tokio::test]
+    async fn fetches_players_only_when_wanted() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let reqs = Arc::new(AtomicU32::new(0));
+        let addr = fake_with_players(reqs.clone()).await;
+        let p = Poller::new(
+            a2s::Client::new(Duration::from_millis(300), 0),
+            None,
+            None,
+            Arc::new(HostLimiter::new(0.0)),
+            Config { min_interval: Duration::from_millis(100), max_inflight: 4, fail_threshold: 2 },
+        );
+        let got: Arc<Mutex<Vec<Arc<ServerResult>>>> = Default::default();
+        let sink_got = got.clone();
+        tokio::spawn(p.clone().run(Arc::new(move |b| sink_got.lock().unwrap().extend(b))));
+        let watch = |players: Option<f64>| vec![WatchItem { addr: addr.to_string(), interval: 0.1, players }];
+
+        // Info only: about 10 polls in a second and no player queries.
+        p.set_watch(watch(None));
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        // Results reach the sink in 200 ms batches, one per server per batch.
+        assert!(got.lock().unwrap().len() >= 3, "info polls keep going");
+        assert_eq!(reqs.load(Ordering::SeqCst), 0, "no player list unless asked");
+
+        // Every poll (search or selected): lists come, one request each after the first.
+        p.set_watch(watch(Some(0.0)));
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        let every_poll = reqs.swap(0, Ordering::SeqCst);
+        assert!(every_poll >= 5, "{every_poll} player requests at every poll");
+        assert_eq!(got.lock().unwrap().last().unwrap().players.len(), 1);
+
+        // Every 10 s (buddies): one fetch, then nothing for the rest of the second.
+        p.set_watch(watch(Some(10.0)));
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        assert!(reqs.load(Ordering::SeqCst) <= 1, "{} player requests with a 10 s schedule", reqs.load(Ordering::SeqCst));
+        assert_eq!(got.lock().unwrap().last().unwrap().players.len(), 1, "the last list is kept between fetches");
     }
 
     /// Ten servers on one IP with a 5/s limit: queries go out one every 200 ms,
@@ -375,7 +487,7 @@ mod tests {
         })));
         let start = Instant::now();
         // A short interval, so without the limit all ten would go out at once.
-        p.set_watch(addrs.iter().map(|a| WatchItem { addr: a.to_string(), interval: 0.1 }).collect());
+        p.set_watch(addrs.iter().map(|a| WatchItem { addr: a.to_string(), interval: 0.1, players: None }).collect());
 
         tokio::time::sleep(Duration::from_millis(500)).await;
         let early: std::collections::HashSet<String> = got.lock().unwrap().iter()
