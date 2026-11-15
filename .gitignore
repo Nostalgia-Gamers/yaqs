@@ -1,3 +1,6 @@
 node_modules
 dist
 *.local
+
+# Your own portable copy and its data (YAQS-data); never commit it
+/portable/

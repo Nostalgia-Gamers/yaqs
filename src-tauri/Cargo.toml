@@ -39,3 +39,12 @@ strip = true
 
 [target."cfg(windows)".dependencies]
 windows-registry = "0.6"
+
+# Debug builds (cargo test/check, tauri dev) keep line tables for our own code
+# and no debug info for dependencies: with full debug info target/debug grew
+# to 8 GB. Panics and backtraces still show file:line for YAQS code.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
