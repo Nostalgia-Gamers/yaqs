@@ -16,11 +16,14 @@ interface Chart {
   values: (number | null)[]
 }
 
-function niceMax(v: number): number {
-  if (v <= 4) return 4
-  const step = 10 ** Math.floor(Math.log10(v))
-  for (const m of [1, 2, 2.5, 5, 10]) if (m * step >= v) return m * step
-  return 10 * step
+/** Y axis for a peak of v: a round tick step (1, 2, 2.5 or 5 × 10ⁿ, whole
+ *  numbers only) with at most three intervals, topped at the first tick at or
+ *  above v. A peak of 251 gives 0–100–200–300 rather than 0–250–500. */
+export function niceScale(v: number): { max: number; step: number } {
+  const want = Math.max(v, 1) / 3
+  const pow = 10 ** Math.floor(Math.log10(want))
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * pow).find((s) => s >= want && Number.isInteger(s)) ?? 10 * pow
+  return { max: Math.max(step, Math.ceil(v / step) * step), step: Math.max(1, step) }
 }
 
 /** Total players of the servers in the current view, as a histogram over time.
@@ -80,7 +83,7 @@ export function PlayersChart({ addrs }: { addrs: string[] }) {
       now: liveNow ?? Math.round(vals[vals.length - 1]),
       peak: Math.round(Math.max(...vals)),
       avg: Math.round(vals.reduce((a, b) => a + b, 0) / vals.length),
-      max: niceMax(Math.max(...vals)),
+      ...niceScale(Math.max(...vals)),
     }
   }, [chart, liveNow])
 
@@ -101,7 +104,7 @@ export function PlayersChart({ addrs }: { addrs: string[] }) {
   const y = (v: number) => PAD.top + plotH - (v / (stats?.max ?? 4)) * plotH
   const x = (i: number) => PAD.left + i * (barW + gap)
 
-  const ticks = stats ? [0, stats.max / 2, stats.max] : [0]
+  const ticks = stats ? Array.from({ length: Math.round(stats.max / stats.step) + 1 }, (_, i) => i * stats.step) : [0]
   const xTicks = [0, Math.round(n / 3), Math.round((2 * n) / 3)]
 
   const hv = hover !== null && chart ? chart.values[hover] : undefined
