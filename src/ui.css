@@ -668,5 +668,6 @@ table.browse-table {
   & .pc-tip .when { color: var(--text-dim); }
   & .pc-tip strong { color: var(--white); }
   & .pc-tip .note { color: var(--text-faint); font-size: 11.5px; }
+  & .pc-tip .range { color: var(--text-dim); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 }
 .page .hint { margin-top: 8px; font-size: 13px; }

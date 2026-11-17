@@ -47,22 +47,46 @@ fn push(series: &mut Series, slot: u64, players: u16, keep: u64) {
     }
 }
 
-/// Average of the samples whose slot overlaps [from, to) ms, counting only
-/// slots that end by `until` (so minutes never spill into the 10 s record).
-fn avg_in(series: Option<&Series>, slot_ms: u64, from: u64, to: u64, until: u64) -> Option<f32> {
-    let series = series?;
+/// The samples whose slot overlaps [from, to) ms as (slot start ms, humans),
+/// oldest first, counting only slots that end by `until` (so minutes never
+/// spill into the 10 s record).
+fn samples_in(series: Option<&Series>, slot_ms: u64, from: u64, to: u64, until: u64) -> Vec<(u64, u16)> {
+    let Some(series) = series else { return vec![] };
     let (a, b) = (from / slot_ms, to.div_ceil(slot_ms));
-    let (mut sum, mut n) = (0u32, 0u32);
-    for &(s, p) in series.iter().rev() {
-        if s < a {
-            break;
+    let mut out: Vec<(u64, u16)> = series
+        .iter()
+        .rev()
+        .take_while(|(s, _)| *s >= a)
+        .filter(|(s, _)| *s < b && (s + 1) * slot_ms <= until)
+        .map(|&(s, p)| (s * slot_ms, p))
+        .collect();
+    out.reverse();
+    out
+}
+
+/// Lowest and highest total over the servers' samples. Servers are sampled at
+/// different moments, so at each sample time every server counts with its
+/// latest sample (or its first one in the bar, before it has any). Adding up
+/// per-server minimums or maximums would pair moments that never happened.
+fn total_range(servers: &[Vec<(u64, u16)>]) -> Option<(u32, u32)> {
+    let mut times: Vec<u64> = servers.iter().flatten().map(|(t, _)| *t).collect();
+    times.sort_unstable();
+    times.dedup();
+    let mut at = vec![0usize; servers.len()];
+    let mut range: Option<(u32, u32)> = None;
+    for t in times {
+        let mut total = 0u32;
+        for (k, s) in servers.iter().enumerate() {
+            while at[k] + 1 < s.len() && s[at[k] + 1].0 <= t {
+                at[k] += 1;
+            }
+            total += s[at[k]].1 as u32;
         }
-        if s < b && (s + 1) * slot_ms <= until {
-            sum += p as u32;
-            n += 1;
-        }
+        let (lo, hi) = range.get_or_insert((total, total));
+        *lo = (*lo).min(total);
+        *hi = (*hi).max(total);
     }
-    (n > 0).then(|| sum as f32 / n as f32)
+    range
 }
 
 #[derive(Serialize)]
@@ -75,6 +99,9 @@ pub struct Chart {
     /// Total humans per bar (sum over servers of each one's average), or
     /// null where no server has data (YAQS wasn't running).
     pub values: Vec<Option<f32>>,
+    /// Lowest and highest total seen inside each bar (null where values is).
+    pub lows: Vec<Option<u32>>,
+    pub highs: Vec<Option<u32>>,
 }
 
 impl History {
@@ -106,30 +133,38 @@ impl History {
         let bucket = (window_ms / bars as u64).max(1);
         let start = now_ms.saturating_sub(bucket * bars as u64);
         let d = self.data.lock().unwrap();
-        let values = (0..bars)
-            .map(|i| {
-                let (from, to) = (start + i as u64 * bucket, start + (i as u64 + 1) * bucket);
-                let mut total: Option<f32> = None;
-                for a in addrs {
+        let (mut values, mut lows, mut highs) = (Vec::with_capacity(bars), Vec::with_capacity(bars), Vec::with_capacity(bars));
+        for i in 0..bars {
+            let (from, to) = (start + i as u64 * bucket, start + (i as u64 + 1) * bucket);
+            let servers: Vec<Vec<(u64, u16)>> = addrs
+                .iter()
+                .map(|a| {
                     // Short bars use the 10 s samples. Minutes fill in only
                     // time before the 10 s record starts (e.g. right after a
                     // restart); inside it, a missing sample really is a gap.
-                    let fine = d.fine.get(a);
-                    let fine_from = fine.and_then(|f| f.front()).map(|(s, _)| s * FINE_MS).unwrap_or(u64::MAX);
-                    let v = if bucket < COARSE_MS * 2 {
-                        avg_in(fine, FINE_MS, from, to, u64::MAX)
-                            .or_else(|| avg_in(d.coarse.get(a), COARSE_MS, from, to, fine_from))
+                    if bucket < COARSE_MS * 2 {
+                        let fine = d.fine.get(a);
+                        let got = samples_in(fine, FINE_MS, from, to, u64::MAX);
+                        if !got.is_empty() {
+                            return got;
+                        }
+                        let fine_from = fine.and_then(|f| f.front()).map(|(s, _)| s * FINE_MS).unwrap_or(u64::MAX);
+                        samples_in(d.coarse.get(a), COARSE_MS, from, to, fine_from)
                     } else {
-                        avg_in(d.coarse.get(a), COARSE_MS, from, to, u64::MAX)
-                    };
-                    if let Some(v) = v {
-                        *total.get_or_insert(0.0) += v;
+                        samples_in(d.coarse.get(a), COARSE_MS, from, to, u64::MAX)
                     }
-                }
-                total
-            })
-            .collect();
-        Chart { start, bucket, values }
+                })
+                .filter(|s| !s.is_empty())
+                .collect();
+            let avg = (!servers.is_empty()).then(|| {
+                servers.iter().map(|s| s.iter().map(|(_, p)| *p as f32).sum::<f32>() / s.len() as f32).sum::<f32>()
+            });
+            let range = total_range(&servers);
+            values.push(avg);
+            lows.push(range.map(|r| r.0));
+            highs.push(range.map(|r| r.1));
+        }
+        Chart { start, bucket, values, lows, highs }
     }
 
     /// Writes the minute history to disk if it changed.
@@ -177,6 +212,25 @@ mod tests {
         // Only the selected servers count.
         let only_a = h.chart(&["a:1".into()], 600_000, 10, now);
         assert_eq!(only_a.values[9], Some(10.0));
+    }
+
+    #[test]
+    fn bar_lows_and_highs_are_of_the_total() {
+        let h = History::load(None);
+        let now = 10_000_000_000u64;
+        // One 60 s bar. a: 10 then 20; b: 30 then 0, sampled at other moments.
+        let bar = now - 60_000;
+        h.record("a:1", bar + 1_000, 10);
+        h.record("b:1", bar + 15_000, 30);
+        h.record("a:1", bar + 31_000, 20);
+        h.record("b:1", bar + 45_000, 0);
+        let c = h.chart(&["a:1".into(), "b:1".into()], 60_000, 1, now);
+        // Totals: 10+30 (b's first sample stands in before it), 10+30, 20+30,
+        // 20+0. Summing per-server minimums would give 10+0, which never happened.
+        assert_eq!((c.lows[0], c.highs[0]), (Some(20), Some(50)));
+        assert_eq!(c.values[0], Some(15.0 + 15.0));
+        let gap = h.chart(&["a:1".into()], 120_000, 2, now);
+        assert_eq!((gap.values[0], gap.lows[0], gap.highs[0]), (None, None, None));
     }
 
     #[test]

@@ -368,6 +368,7 @@ export const es: Dict = {
   'ch.nowLabel': 'ahora',
   'ch.players': (n) => `${n} ${plural(n, 'jugador', 'jugadores')}`,
   'ch.avgNote': 'promedio en esta barra',
+  'ch.range': (lo, hi) => `mín ${lo} · máx ${hi}`,
   'ch.gap': 'Sin datos (YAQS estaba cerrado)',
   'ch.noData': 'Todavía no hay datos. YAQS registra los jugadores mientras está abierto.',
   'ch.summary': (w, now, peak, avg) => `Jugadores en los últimos ${w}: ahora ${now}, pico ${peak}, promedio ${avg}.`,

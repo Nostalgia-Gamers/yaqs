@@ -14,6 +14,8 @@ interface Chart {
   start: number
   bucket: number
   values: (number | null)[]
+  lows: (number | null)[]
+  highs: (number | null)[]
 }
 
 /** Y axis for a peak of v: a round tick step (1, 2, 2.5 or 5 × 10ⁿ, whole
@@ -82,8 +84,8 @@ export function PlayersChart({ addrs }: { addrs: string[] }) {
     const now = liveNow ?? Math.round(vals[vals.length - 1])
     return {
       now,
-      // Bars are averages over their slice, so the live total can beat them all.
-      peak: Math.max(now, Math.round(Math.max(...vals))),
+      // The highest total seen, not the tallest bar (bars are averages).
+      peak: Math.max(now, ...(chart?.highs ?? []).map((h) => h ?? 0)),
       avg: Math.round(vals.reduce((a, b) => a + b, 0) / vals.length),
       ...niceScale(Math.max(...vals)),
     }
@@ -110,6 +112,8 @@ export function PlayersChart({ addrs }: { addrs: string[] }) {
   const xTicks = [0, Math.round(n / 3), Math.round((2 * n) / 3)]
 
   const hv = hover !== null && chart ? chart.values[hover] : undefined
+  const hLow = hover !== null && chart ? chart.lows[hover] : null
+  const hHigh = hover !== null && chart ? chart.highs[hover] : null
   const hoverFrom = hover !== null && chart ? chart.start + hover * chart.bucket : 0
 
   return (
@@ -197,6 +201,7 @@ export function PlayersChart({ addrs }: { addrs: string[] }) {
               <span className="when">{fmt(hoverFrom)}–{fmt(hoverFrom + chart.bucket)}</span>
               <strong>{hv === null || hv === undefined ? t('ch.gap') : t('ch.players', Math.round(hv))}</strong>
               {hv !== null && hv !== undefined && <span className="note">{t('ch.avgNote')}</span>}
+              {hLow != null && hHigh != null && <span className="range">{t('ch.range', hLow, hHigh)}</span>}
             </div>
           )}
         </div>

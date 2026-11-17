@@ -367,6 +367,7 @@ export const en = {
   'ch.nowLabel': 'now',
   'ch.players': (n: number) => `${n} ${plural(n, 'player', 'players')}`,
   'ch.avgNote': 'average in this bar',
+  'ch.range': (lo: number, hi: number) => `min ${lo} · max ${hi}`,
   'ch.gap': 'No data (YAQS was closed)',
   'ch.noData': 'No data yet. YAQS records player counts while it runs.',
   'ch.summary': (w: string, now: number, peak: number, avg: number) => `Players over the last ${w}: now ${now}, peak ${peak}, average ${avg}.`,
