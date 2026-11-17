@@ -79,9 +79,11 @@ export function PlayersChart({ addrs }: { addrs: string[] }) {
   const stats = useMemo(() => {
     const vals = (chart?.values ?? []).filter((v): v is number => v !== null)
     if (!vals.length) return null
+    const now = liveNow ?? Math.round(vals[vals.length - 1])
     return {
-      now: liveNow ?? Math.round(vals[vals.length - 1]),
-      peak: Math.round(Math.max(...vals)),
+      now,
+      // Bars are averages over their slice, so the live total can beat them all.
+      peak: Math.max(now, Math.round(Math.max(...vals))),
       avg: Math.round(vals.reduce((a, b) => a + b, 0) / vals.length),
       ...niceScale(Math.max(...vals)),
     }
