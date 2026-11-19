@@ -153,6 +153,8 @@ export const en = {
   'dt.game': 'Game',
   'dt.players': 'Players',
   'dt.bots': (n: number) => `${n} ${plural(n, 'bot', 'bots')}`,
+  'dt.bot': 'BOT',
+  'dt.botHelp': "Bot or HLTV proxy (flagged by the server's Steam query reply)",
   'dt.reserved': (n: number) => `${n} reserved`,
   'dt.full': 'Full',
   'dt.map': 'Map',

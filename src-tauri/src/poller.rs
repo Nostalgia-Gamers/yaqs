@@ -279,7 +279,7 @@ impl Poller {
                     last_seen: t.last.as_ref().and_then(|l| l.last_seen),
                 }
             }
-            Ok((info, rtt)) => {
+            Ok((mut info, rtt)) => {
                 t.fails = 0;
                 t.engine = info.engine_kind();
                 if players.is_some() {
@@ -294,6 +294,10 @@ impl Poller {
                     None if info.players == 0 => (vec![], Some(ts)),
                     None => previous(),
                 };
+                // Many GoldSrc servers report 0 bots in A2S_INFO even when the
+                // player list flags some (a kept list is clamped by the count).
+                let flagged = players.iter().filter(|p| p.bot).count().min(u8::MAX as usize) as u8;
+                info.bots = info.bots.max(flagged).min(info.players);
                 ServerResult {
                     addr: addr.to_string(),
                     online: true,

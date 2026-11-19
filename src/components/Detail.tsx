@@ -200,8 +200,11 @@ export function Detail({ addr, onClose }: { addr: string; onClose: () => void })
             </tr></thead>
             <tbody>
               {players.map((p, i) => (
-                <tr key={`${p.name}-${i}`} className={buddyMatch(p.name, state.buddies) ? 'buddy' : ''}>
-                  <td className="pname">{p.name || t('dt.connecting')}</td>
+                <tr key={`${p.name}-${i}`} className={[buddyMatch(p.name, state.buddies) && 'buddy', p.bot && 'bot'].filter(Boolean).join(' ')}>
+                  <td className="pname">
+                    {p.bot && <span className="botmark" title={t('dt.botHelp')}>{t('dt.bot')}</span>}
+                    {p.name || t('dt.connecting')}
+                  </td>
                   <td className="num">{p.score}</td>
                   <td className="num dim">{duration(p.duration)}</td>
                 </tr>

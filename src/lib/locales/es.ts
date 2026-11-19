@@ -155,6 +155,8 @@ export const es: Dict = {
   'dt.game': 'Juego',
   'dt.players': 'Jugadores',
   'dt.bots': (n) => `${n} ${plural(n, 'bot', 'bots')}`,
+  'dt.bot': 'BOT',
+  'dt.botHelp': "Bot o proxy HLTV (marcado en la respuesta de Steam del servidor)",
   'dt.reserved': (n) => `${n} ${plural(n, 'reservado', 'reservados')}`,
   'dt.full': 'Lleno',
   'dt.map': 'Mapa',

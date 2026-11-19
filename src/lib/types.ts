@@ -28,6 +28,8 @@ export interface Player {
   name: string
   score: number
   duration: number
+  /** Bot or HLTV proxy, flagged by Steam in the A2S_PLAYER reply. */
+  bot: boolean
 }
 
 export interface Rule {
