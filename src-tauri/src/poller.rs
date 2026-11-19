@@ -248,11 +248,17 @@ impl Poller {
                     last_seen: t.last.as_ref().and_then(|l| l.last_seen),
                 }
             }
-            Ok((info, rtt)) => {
+            Ok((mut info, rtt)) => {
                 t.fails = 0;
                 t.engine = info.engine_kind();
                 let players = match players {
-                    Some(Ok(p)) => p,
+                    Some(Ok(p)) => {
+                        // Many GoldSrc servers report 0 bots in A2S_INFO even
+                        // when the player list flags some.
+                        let flagged = p.iter().filter(|p| p.bot).count().min(u8::MAX as usize) as u8;
+                        info.bots = info.bots.max(flagged).min(info.players);
+                        p
+                    }
                     // Keep the previous list rather than flicker to empty.
                     Some(Err(_)) => t.last.as_ref().map(|l| l.players.clone()).unwrap_or_default(),
                     None => vec![],

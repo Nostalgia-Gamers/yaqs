@@ -67,6 +67,8 @@ pub struct Player {
     pub name: String,
     pub score: i32,
     pub duration: f32,
+    /// Bot or HLTV proxy, read from the reply's index byte (see parse_players).
+    pub bot: bool,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -531,18 +533,33 @@ pub(crate) fn parse_players(p: &[u8]) -> Res<Vec<Player>> {
     let mut r = Reader::new(&p[1..]);
     let n = r.u8() as usize;
     let mut out = Vec::with_capacity(n);
+    let mut index = Vec::with_capacity(n);
     for _ in 0..n {
-        r.u8(); // index
+        let i = r.u8();
         let name = r.string();
         let score = r.i32();
         let duration = r.f32();
         if r.bad {
             break; // big servers truncate the list; keep what parsed
         }
-        out.push(Player { name, score, duration });
+        index.push(i);
+        out.push(Player { name, score, duration, bot: false });
     }
     if r.bad && out.is_empty() && n > 0 {
         return Err(Error::Malformed);
+    }
+    // Steam's game server library answers A2S_PLAYER for GoldSrc (and other
+    // games that leave queries to Steam). It writes the list position in the
+    // low 7 bits of the index byte and sets 0x80 for users registered through
+    // CreateUnauthenticatedUserConnection, which is how the engine registers
+    // bots and HLTV proxies. It works even when A2S_INFO reports 0 bots.
+    // Source's own reply writes 0 there, and others may write a slot number,
+    // so the flag is only trusted when the low bits match the position.
+    let steam = out.len() <= 128 && index.iter().enumerate().all(|(pos, &i)| (i & 0x7F) as usize == pos);
+    if steam {
+        for (p, i) in out.iter_mut().zip(&index) {
+            p.bot = i & 0x80 != 0;
+        }
     }
     Ok(out)
 }
@@ -697,8 +714,37 @@ mod tests {
         .await;
         let players = client().players(addr, Engine::GoldSrc).await.unwrap();
         assert_eq!(players.len(), 2);
-        assert_eq!(players[0], Player { name: "Shiobi".into(), score: 15, duration: 120.5 });
+        assert_eq!(players[0], Player { name: "Shiobi".into(), score: 15, duration: 120.5, bot: false });
         assert_eq!(players[1].name, "José");
+    }
+
+    fn player(idx: u8, name: &str) -> Pkt {
+        Pkt(vec![]).u8(idx).s(name).i32(0).f32(1.0)
+    }
+
+    fn players_reply(entries: &[(u8, &str)]) -> Vec<u8> {
+        let mut p = Pkt(vec![]).u8(b'D').u8(entries.len() as u8);
+        for &(i, n) in entries {
+            p = p.raw(&player(i, n).0);
+        }
+        p.0
+    }
+
+    #[test]
+    fn players_steam_bot_flag() {
+        // As captured from a ReHLDS server with HLTV and YaPB bots.
+        let list = parse_players(&players_reply(&[(0, "human"), (0x81, "HLTV"), (2, "human"), (0x83, "bot")])).unwrap();
+        assert_eq!(list.iter().map(|p| p.bot).collect::<Vec<_>>(), [false, true, false, true]);
+    }
+
+    #[test]
+    fn players_bot_flag_needs_steam_layout() {
+        // Source engine: index is always 0.
+        let list = parse_players(&players_reply(&[(0, "a"), (0, "b")])).unwrap();
+        assert!(list.iter().all(|p| !p.bot));
+        // Raw slot numbers that happen to have the high bit set.
+        let list = parse_players(&players_reply(&[(5, "a"), (130, "b")])).unwrap();
+        assert!(list.iter().all(|p| !p.bot));
     }
 
     #[tokio::test]
